@@ -4,4 +4,4 @@ app = FastAPI()
 
 @app.get("/")
 def root():
-    return {"ok": True, "service": "devops-lab", "version": "v3"} 
+    return {"ok": True, "service": "devops-lab", "version": "v4"} 
