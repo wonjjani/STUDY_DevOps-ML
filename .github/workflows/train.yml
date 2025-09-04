@@ -1,0 +1,50 @@
+name: Train-Model
+on:
+  workflow_dispatch:
+  push:
+    paths: [ "scripts/**", "app/**", ".github/workflows/train.yml" ]
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: ap-northeast-2
+  MODEL_REPO: devops-lab
+
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r app/requirements.txt
+      - name: Configure AWS (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Read model bucket from Terraform
+        id: tf
+        run: echo "bucket=$(cd infra && terraform output -raw model_bucket)" >> $GITHUB_OUTPUT
+      - name: Train & Upload to S3
+        env:
+          MODEL_BUCKET: ${{ steps.tf.outputs.bucket }}
+          MODEL_REPO: ${{ env.MODEL_REPO }}
+          MODEL_VERSION: ${{ github.sha }}
+        run: python scripts/train.py
+      - name: Restart service to load latest model
+        env:
+          CLUSTER: ${{ secrets.ECS_CLUSTER || vars.ECS_CLUSTER }}
+          SERVICE: ${{ secrets.ECS_SERVICE || vars.ECS_SERVICE }}
+        run: |
+          aws ecs update-service \
+            --cluster "$CLUSTER" \
+            --service "$SERVICE" \
+            --force-new-deployment \
+            --region "${{ env.AWS_REGION }}"

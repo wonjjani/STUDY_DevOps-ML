@@ -2,6 +2,7 @@
 __pycache__/
 *.pyc
 trust.json
+gha-s3-train.json
 
 # Terraform
 infra/.terraform/

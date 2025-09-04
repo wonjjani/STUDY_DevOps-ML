@@ -36,7 +36,47 @@ resource "aws_ecs_cluster" "this" {
   name = var.name
 }
 
-# IAM Role (Task Execution Role)
+# ---- (ML 추가) 모델 버킷 & 앱 Task Role ----
+
+resource "aws_s3_bucket" "ml" {
+  bucket        = "devops-lab-${data.aws_caller_identity.current.account_id}-ml"
+  force_destroy = true
+}
+
+resource "aws_iam_role" "task_app" {
+  name = "${var.name}-task-role"
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [{
+      Effect    = "Allow",
+      Principal = { Service = "ecs-tasks.amazonaws.com" },
+      Action    = "sts:AssumeRole"
+    }]
+  })
+}
+
+resource "aws_iam_role_policy" "task_app_s3_read" {
+  name = "${var.name}-task-s3-read"
+  role = aws_iam_role.task_app.id
+  policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [
+      {
+        Effect   = "Allow",
+        Action   = ["s3:GetObject"],
+        Resource = "arn:aws:s3:::${aws_s3_bucket.ml.bucket}/models/*"
+      },
+      {
+        Effect   = "Allow",
+        Action   = ["s3:ListBucket"],
+        Resource = "arn:aws:s3:::${aws_s3_bucket.ml.bucket}",
+        Condition = { StringLike = { "s3:prefix": ["models/*"] } }
+      }
+    ]
+  })
+}
+
+# ---- Task Execution Role ----
 resource "aws_iam_role" "task_execution" {
   name = "${var.name}-task-execution"
   assume_role_policy = jsonencode({
@@ -133,23 +173,32 @@ resource "aws_ecs_task_definition" "app" {
   requires_compatibilities = ["FARGATE"]
   cpu                      = var.fargate_cpu
   memory                   = var.fargate_memory
-  execution_role_arn       = aws_iam_role.task_execution.arn
+
+  execution_role_arn = aws_iam_role.task_execution.arn
+  task_role_arn      = aws_iam_role.task_app.arn
 
   container_definitions = jsonencode([
     {
-      name      = var.name
-      image     = "${aws_ecr_repository.app.repository_url}:latest"
-      essential = true
+      name      = var.name,
+      image     = "${aws_ecr_repository.app.repository_url}:latest",
+      essential = true,
       portMappings = [{
-        containerPort = var.container_port
-        hostPort      = var.container_port
+        containerPort = var.container_port,
+        hostPort      = var.container_port,
         protocol      = "tcp"
-      }]
+      }],
+      environment = [
+        {
+          name  = "MODEL_S3_URI",
+          value = "s3://${aws_s3_bucket.ml.bucket}/models/${var.name}/latest/model.pkl"
+        },
+        { name = "MODEL_VERSION", value = "latest" }
+      ],
       logConfiguration = {
-        logDriver = "awslogs"
+        logDriver = "awslogs",
         options = {
-          awslogs-group         = aws_cloudwatch_log_group.app.name
-          awslogs-region        = var.region
+          awslogs-group         = aws_cloudwatch_log_group.app.name,
+          awslogs-region        = var.region,
           awslogs-stream-prefix = var.name
         }
       }

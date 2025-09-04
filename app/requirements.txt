@@ -4,3 +4,4 @@ scikit-learn==1.4.2
 pandas==2.2.2
 joblib==1.4.2
 boto3==1.34.162
+aws-embedded-metrics==2.0.4
