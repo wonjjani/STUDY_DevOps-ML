@@ -1,39 +1,80 @@
 name: CD
 on:
-    push:
-        branches: [ main ]
+  push:
+    branches: [ main ]
+
+concurrency:
+  group: ecs-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
-    id-token: write
-    contents: read
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: ap-northeast-2   # 리전 고정(Secret 불필요)
+
 jobs:
-    deploy:
-        runs-on: ubuntu-latest
-        steps:
-            - uses: actions/checkout@v4
-            - name: Configure AWS
-              uses: aws-actions/configure-aws-credentials@v4
-              with:
-                role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-                aws-region: ${{ secrets.AWS_REGION }}
-            - name: Login to ECR
-              id: ecr
-              uses: aws-actions/amazon-ecr-login@v2
-            - name: Build & Push
-              env:
-                ECR_REGISTRY: ${{ steps.ecr.outputs.registry }}
-                ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
-              run: |
-                IMAGE_URI=$ECR_REGISTRY/$ECR_REPOSITORY:latest
-                docker build -t $IMAGE_URI .
-                docker push $IMAGE_URI
-            - name: Force new deployment
-              env:
-                CLUSTER: ${{ secrets.ECS_CLUSTER }}
-                SERVICE: ${{ secrets.ECS_SERVICE }}
-                AWS_REGION: ${{ secrets.AWS_REGION }}
-              run: |
-                aws ecs update-service \
-                    --cluster "$CLUSTER" \
-                    --service "$SERVICE" \
-                    --force-new-deployment \
-                    --region "$AWS_REGION"
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # 0) 프리플라이트: 필수 값/파일 존재 확인
+      - name: Preflight checks
+        run: |
+          set -euo pipefail
+          test -n "${{ secrets.AWS_ROLE_ARN }}" || (echo "::error::AWS_ROLE_ARN secret missing"; exit 1)
+          test -n "${{ secrets.ECR_REPOSITORY }}" || (echo "::error::ECR_REPOSITORY secret missing"; exit 1)
+          test -n "${{ secrets.ECS_CLUSTER }}" || (echo "::error::ECS_CLUSTER secret missing"; exit 1)
+          test -n "${{ secrets.ECS_SERVICE }}" || (echo "::error::ECS_SERVICE secret missing"; exit 1)
+          test -f Dockerfile || (echo "::error::Dockerfile not found at repo root"; ls -la; exit 1)
+          echo "OK: preflight"
+
+      # 1) OIDC로 역할 가정
+      - name: Configure AWS (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}   # 예: arn:aws:iam::651706765732:role/gha-ecr-ecs-deploy
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: gha-${{ github.run_id }}
+
+      # 1.5) (디버그) 누가 됐는지 확인
+      - name: WhoAmI (STS)
+        run: aws sts get-caller-identity
+
+      # 2) ECR 로그인
+      - name: Login to Amazon ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      # 3) 빌드 & 푸시 (latest + sha 둘 다)
+      - name: Build & Push Docker image
+        env:
+          ECR_REGISTRY: ${{ steps.ecr.outputs.registry }}
+          ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}  # 예: devops-lab
+        run: |
+          set -euo pipefail
+          echo "Registry=$ECR_REGISTRY Repo=$ECR_REPOSITORY"
+          IMAGE_SHA=$ECR_REGISTRY/$ECR_REPOSITORY:${{ github.sha }}
+          IMAGE_LATEST=$ECR_REGISTRY/$ECR_REPOSITORY:latest
+          docker build -t $IMAGE_SHA -t $IMAGE_LATEST .
+          docker push $IMAGE_SHA
+          docker push $IMAGE_LATEST
+
+      # 4) ECS 강제 재배포 (+안정화 대기)
+      - name: Force new ECS deployment
+        env:
+          CLUSTER: ${{ secrets.ECS_CLUSTER }}   # 예: devops-lab
+          SERVICE: ${{ secrets.ECS_SERVICE }}   # 예: devops-lab
+        run: |
+          set -euo pipefail
+          aws ecs update-service \
+            --cluster "$CLUSTER" \
+            --service "$SERVICE" \
+            --force-new-deployment \
+            --region "${{ env.AWS_REGION }}"
+          aws ecs wait services-stable \
+            --cluster "$CLUSTER" \
+            --services "$SERVICE" \
+            --region "${{ env.AWS_REGION }}"

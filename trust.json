@@ -6,7 +6,7 @@
     "Action": "sts:AssumeRoleWithWebIdentity",
     "Condition": {
       "StringEquals": { "token.actions.githubusercontent.com:aud": "sts.amazonaws.com" },
-      "StringLike":   { "token.actions.githubusercontent.com:sub": "repo:/:ref:refs/heads/main" }
+      "StringLike":   { "token.actions.githubusercontent.com:sub": "repo:wonjjani/STUDY_DevOps-ML:ref:refs/heads/main" }
     }
   }]
 }
