@@ -228,3 +228,48 @@ resource "aws_ecs_service" "app" {
 
   depends_on = [aws_lb_listener.http]
 }
+
+# SageMaker Training Execution Role (학습 잡이 assume)
+resource "aws_iam_role" "sm_training_exec" {
+  name = "${var.name}-sm-train-exec"
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [{
+      Effect = "Allow",
+      Principal = { Service = "sagemaker.amazonaws.com" },
+      Action = "sts:AssumeRole"
+    }]
+  })
+}
+
+# 최소 권한: S3(models/*) 읽기/쓰기 + 로그
+resource "aws_iam_role_policy" "sm_training_exec_inline" {
+  name = "${var.name}-sm-train-inline"
+  role = aws_iam_role.sm_training_exec.id
+  policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [
+      {
+        Effect: "Allow",
+        Action: ["s3:GetObject","s3:PutObject","s3:DeleteObject"],
+        Resource: "arn:aws:s3:::${aws_s3_bucket.ml.bucket}/models/*"
+      },
+      {
+        Effect: "Allow",
+        Action: ["s3:ListBucket"],
+        Resource: "arn:aws:s3:::${aws_s3_bucket.ml.bucket}"
+      },
+      {
+        Effect: "Allow",
+        Action: ["logs:CreateLogGroup","logs:CreateLogStream","logs:PutLogEvents"],
+        Resource: "*"
+      }
+    ]
+  })
+}
+
+# (선택) SageMaker Model Registry 그룹(이름만 만들어 둠)
+resource "aws_sagemaker_model_package_group" "registry" {
+  model_package_group_name = "${var.name}-registry"
+  model_package_group_description = "Simple registry for ${var.name}"
+}
