@@ -1,14 +1,5 @@
 .venv/
 __pycache__/
-*.pyc
-trust.json
-gha-s3-train.json
-
-# Terraform
-infra/.terraform/
-infra/.terraform.lock.hcl
-infra/terraform.tfstate
-infra/terraform.tfstate.backup
-
+*.pyc/
 # Docker
 *.log
