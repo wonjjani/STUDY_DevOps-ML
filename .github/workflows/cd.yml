@@ -1,53 +1,41 @@
+## .github/workflows/cd.yml -> main 푸시 시 빌드 -> ECR 푸시 -> ECS 재배포
+
 name: CD
 on:
-  push:
-    branches: [ main ]
-
+    push:
+        branches: [ main ]
 permissions:
-  id-token: write
-  contents: read
-
-env:
-  AWS_REGION: ap-northeast-2
-
+    id-token: write
+    contents: read
 jobs:
-  deploy:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Configure AWS (OIDC)
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Login to Amazon ECR
-        id: ecr
-        uses: aws-actions/amazon-ecr-login@v2
-
-      - name: Build & Push
-        env:
-          ECR_REGISTRY: ${{ steps.ecr.outputs.registry }}
-          ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }} # ex) devops-lab
-        run: |
-          set -euo pipefail
-          IMAGE_LATEST=$ECR_REGISTRY/$ECR_REPOSITORY:latest
-          docker build -t $IMAGE_LATEST .
-          docker push $IMAGE_LATEST
-
-      - name: Force new ECS deployment
-        env:
-          CLUSTER: ${{ secrets.ECS_CLUSTER }} # ex) devops-lab
-          SERVICE: ${{ secrets.ECS_SERVICE }} # ex) devops-lab
-        run: |
-          set -euo pipefail
-          aws ecs update-service \
-            --cluster "$CLUSTER" \
-            --service "$SERVICE" \
-            --force-new-deployment \
-            --region "${{ env.AWS_REGION }}"
-          aws ecs wait services-stable \
-            --cluster "$CLUSTER" \
-            --services "$SERVICE" \
-            --region "${{ env.AWS_REGION }}"
+    deploy:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+            - name: Configure AWS
+              uses: aws-actions/configure-aws-credentials@v4
+              with:
+                role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+                aws-region: ${{ secrets.AWS_REGION }}
+            - name: Login to ECR
+              id: ecr
+              uses: aws-actions/amazon-ecr-login@v2
+            - name: Build & Push
+              env:
+                ECR_REGISTRY: ${{ steps.ecr.outputs.registry }}
+                ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
+              run: |
+                IMAGE_URI=$ECR_REGISTRY/$ECR_REPOSITORY:latest
+                docker build -t $IMAGE_URI .
+                docker push $IMAGE_URI
+            - name: Force new deployment
+              env:
+                CLUSTER: ${{ secrets.ECS_CLUSTER }}
+                SERVICE: ${{ secrets.ECS_SERVICE }}
+                AWS_REGION: ${{ secrets.AWS_REGION }}
+              run: |
+                aws ecs update-service \
+                    --cluster "$CLUSTER" \
+                    --service "$SERVICE" \
+                    --force-new-deployment \
+                    --region "$AWS_REGION"
