@@ -1,0 +1,7 @@
+{
+  "notebook_name": "devops-lab-notebook",
+  "role_arn": "arn:aws:iam::651706765732:role/devops-lab-sagemaker-exec",
+  "subnet_id": "subnet-02175ebeb4fc2dd34",
+  "sg_id": "sg-0db7d347ffd4e70d6",
+  "region": "ap-northeast-2"
+}
